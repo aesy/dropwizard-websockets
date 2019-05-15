@@ -38,6 +38,8 @@ import org.eclipse.jetty.websocket.jsr356.endpoints.JsrAnnotatedEventDriver;
 import org.eclipse.jetty.websocket.jsr356.server.AnnotatedServerEndpointMetadata;
 import org.eclipse.jetty.websocket.jsr356.server.JsrServerEndpointImpl;
 import org.eclipse.jetty.websocket.jsr356.server.PathParamServerEndpointConfig;
+import org.glassfish.hk2.api.AOPProxyCtl;
+import org.glassfish.hk2.api.ActiveDescriptor;
 
 public class InstJsrServerEndpointImpl implements EventDriverImpl {
     private final MetricRegistry metrics;
@@ -94,6 +96,33 @@ public class InstJsrServerEndpointImpl implements EventDriverImpl {
 
     @Override
     public boolean supports(Object websocket) {
-        return origImpl.supports(websocket);
+        if (origImpl.supports(websocket)) {
+            return true;
+        }
+
+        if (!(websocket instanceof EndpointInstance)) {
+            return false;
+        }
+
+        // Proxied versions of HK2-managed classes does not have the @ServerEndpoint as it
+        // is not inherited. The following code fixes that by allowing us to use the
+        // underlying class instead of the proxied class.
+        EndpointInstance ei = (EndpointInstance) websocket;
+        Object endpoint = ei.getEndpoint();
+
+        if (!(endpoint instanceof AOPProxyCtl)) {
+            return false;
+        }
+
+        ActiveDescriptor<?> descriptor = ((AOPProxyCtl) endpoint).__getUnderlyingDescriptor();
+        Class<?> clazz = descriptor.getImplementationClass();
+
+        if (clazz == null) {
+            return false;
+        }
+
+        ServerEndpoint anno = clazz.getAnnotation(ServerEndpoint.class);
+
+        return (anno != null);
     }
 }
